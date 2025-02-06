@@ -115,6 +115,13 @@ class Emulator:
         
         # Current procedure
         self.current_proc = None
+        
+        # I/O handler
+        self.io_handler = None
+
+    def set_io_handler(self, handler):
+        """Set the I/O handler for input/output operations"""
+        self.io_handler = handler
 
     def reset(self):
         """Reset the emulator state"""
@@ -397,14 +404,16 @@ class Emulator:
         service = self.get_register_value('ah')
         
         if service == 1:  # Single character input
-            char = input()
-            if char:
-                self.set_register_value('al', ord(char[0]))
-                print(char[0])
+            if self.io_handler:
+                char = self.io_handler.handle_input()
+                if char:
+                    self.set_register_value('al', ord(char[0]))
+                    self.io_handler.handle_output(char[0] + '\n')
             
         elif service == 2:  # Display character
             char = chr(self.get_register_value('dl'))
-            print(char, end='', flush=True)
+            if self.io_handler:
+                self.io_handler.handle_output(char)
             
         elif service == 9:  # Display string
             offset = self.get_register_value('dx')
@@ -416,10 +425,12 @@ class Emulator:
                     break
                 output += char
                 offset += 1
-            print(output, end='', flush=True)
+            if self.io_handler:
+                self.io_handler.handle_output(output)
                 
-        elif service == 0x4c or service == 76:  # Program termination (76 is decimal for 0x4C)
-            print("\nProgram terminated.")
+        elif service == 0x4c:  # Program termination
+            if self.io_handler:
+                self.io_handler.handle_output("\nProgram terminated.\n")
 
     def get_memory_byte(self, address):
         """Get a byte from memory"""

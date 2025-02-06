@@ -1,69 +1,184 @@
-# Modern EMU8086
+# NeoEmu86 🚀
 
-A modern, user-friendly Intel 8086 assembly emulator with a clean and intuitive interface. This emulator provides a better user experience compared to the traditional Emu8086 while maintaining compatibility with 8086 assembly instructions.
+A modern, feature-rich Intel 8086 assembly emulator with a sleek dark-themed UI. NeoEmu86 provides a contemporary development environment for learning and working with 8086 assembly language.
 
-## Features
+![NeoEmu86 Screenshot](screenshot.png)
 
-- 🎨 Modern, dark-themed UI with syntax highlighting
-- 💻 Real-time register and flag status updates
-- 🔍 Memory viewer with hexadecimal display
-- ⚡ Step-by-step execution with F8
-- 🏃 Full program execution with F5
-- 🔄 Reset functionality
-- 📝 Built-in code editor with syntax highlighting
+## ✨ Features
 
-## Installation
+- 🎨 Modern dark-themed UI inspired by VS Code
+- 📝 Advanced code editor with syntax highlighting
+- 🔢 Real-time register and flag monitoring
+- 🧮 Memory viewer with hexadecimal display
+- ⚡ Step-by-step debugging (F8)
+- 🏃‍♂️ Full program execution (F5)
+- 💻 Interactive console for I/O operations
+- 📊 Register and flag state visualization
+- 📁 File operations (New, Open, Save)
+- 🔄 Program reset functionality
 
-1. Make sure you have Python 3.8 or newer installed on your system.
+## 🛠️ Installation
 
-2. Clone this repository:
+### Prerequisites
+- Python 3.8 or newer
+- PyQt6
+
+### Setup
+
+1. Clone the repository:
 ```bash
-git clone [repository-url]
-cd modern-emu8086
+git clone https://github.com/Seyamalam/neoemu86.git
+cd neoemu86
 ```
 
-3. Install the required dependencies:
+2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-## Usage
+## 🚀 Usage
 
-1. Run the emulator:
+Run the emulator:
 ```bash
-python modern_emu8086.py
+python modern_emu8086_gui.py
 ```
 
-2. Write or paste your 8086 assembly code in the editor.
+### Basic Operations
 
-3. Use the following controls:
-   - Click "Run" or press F5 to execute the entire program
-   - Click "Step" or press F8 to execute one instruction at a time
-   - Click "Reset" to clear all registers and memory
+- **New File**: Create a new assembly program
+- **Open**: Load an existing .asm file
+- **Save**: Save your current program
+- **Run (F5)**: Execute the entire program
+- **Step (F8)**: Execute one instruction at a time
+- **Reset**: Clear all registers and memory
 
-## Supported Instructions
+### Example Program
+
+```assembly
+.model small
+.stack 100h
+.data
+    msg1 db 'Enter first number: $'
+    msg2 db 'Enter second number: $'
+    result_msg db 'Result: $'
+    newline db 13, 10, '$'
+    num1 db ?
+    num2 db ?
+    result db ?
+
+.code
+main proc
+    mov ax, @data
+    mov ds, ax
+
+    ; Display first prompt
+    lea dx, msg1
+    mov ah, 9
+    int 21h
+    
+    ; Get first number
+    mov ah, 1
+    int 21h
+    sub al, '0'
+    mov num1, al
+
+    ; Display second prompt
+    lea dx, msg2
+    mov ah, 9
+    int 21h
+    
+    ; Get second number
+    mov ah, 1
+    int 21h
+    sub al, '0'
+    mov num2, al
+
+    ; Add numbers
+    mov al, num1
+    add al, num2
+    add al, '0'
+    mov result, al
+
+    ; Display result
+    lea dx, result_msg
+    mov ah, 9
+    int 21h
+    mov dl, result
+    mov ah, 2
+    int 21h
+
+    ; Exit program
+    mov ah, 4ch
+    int 21h
+main endp
+end main
+```
+
+## 🔧 Supported Instructions
 
 Currently supported 8086 instructions include:
 - `MOV` - Move data between registers or load immediate values
 - `ADD` - Add two values
 - `SUB` - Subtract two values
+- `LEA` - Load Effective Address
+- `INT` - Interrupt (21h services)
 
-More instructions will be added in future updates.
+Supported INT 21h services:
+- Function 1: Single character input
+- Function 2: Display character
+- Function 9: Display string
+- Function 4Ch: Program termination
 
-## Example Code
+## 🌟 Features in Detail
 
-```assembly
-; Sample 8086 Assembly Code
-mov ax, 1234    ; Load immediate value into AX
-mov bx, 5678    ; Load immediate value into BX
-add ax, bx      ; Add BX to AX
-mov cx, ax      ; Copy result to CX
-```
+### Code Editor
+- Syntax highlighting for assembly keywords
+- Line numbers
+- Auto-indentation
+- Comment highlighting
 
-## Contributing
+### Register View
+- Real-time updates of register values
+- Hexadecimal display
+- Support for 16-bit and 8-bit registers
 
-Contributions are welcome! Feel free to submit issues and pull requests.
+### Memory View
+- 64KB memory space visualization
+- Hexadecimal display
+- Organized offset view
 
-## License
+### Flags Panel
+- Real-time flag status updates
+- Support for all 8086 flags (ZF, SF, CF, OF, AF, PF)
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+### Interactive Console
+- Terminal-style I/O
+- Support for program input/output
+- Clear display of program execution
+
+## 🤝 Contributing
+
+Contributions are welcome! Here are some ways you can contribute:
+
+1. 🐛 Report bugs
+2. 💡 Suggest new features
+3. 📝 Improve documentation
+4. 🔧 Submit pull requests
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Inspired by the classic Emu8086
+- Built with PyQt6
+- Dark theme inspired by VS Code
+
+## 📞 Contact
+
+- GitHub: [@Seyamalam](https://github.com/Seyamalam)
+- Email: seyamalam41@gmail.com
+
+---
+Made with ❤️ for assembly enthusiasts 

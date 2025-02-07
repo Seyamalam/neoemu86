@@ -36,16 +36,12 @@ class Flags:
 class DataSegment:
     def __init__(self):
         self.variables = {}
-        self.memory = bytearray(65536)
+        self.memory = bytearray(65536)  # 64KB memory
         self.current_offset = 0
 
     def define_variable(self, name, value, size=1):
         """Define a variable in the data segment"""
-        self.variables[name] = {
-            'offset': self.current_offset,
-            'size': size,
-            'value': value
-        }
+        name = name.lower().strip()  # Normalize variable names
         if isinstance(value, str):
             # Store string in memory
             for i, char in enumerate(value):
@@ -53,24 +49,43 @@ class DataSegment:
                     break
                 self.memory[self.current_offset + i] = ord(char)
             self.memory[self.current_offset + len(value)] = ord('$')  # Add string terminator
-            self.current_offset += len(value) + 1
+            size = len(value) + 1
         else:
             # Store numeric value
-            self.memory[self.current_offset] = value
-            self.current_offset += size
+            self.memory[self.current_offset] = value & 0xFF
+
+        # Store variable information
+        self.variables[name] = {
+            'offset': self.current_offset,
+            'size': size,
+            'value': value
+        }
+        self.current_offset += size
 
     def get_variable_offset(self, name):
         """Get the offset of a variable"""
-        if name in self.variables:
+        name = name.lower().strip()  # Normalize variable names
+        if '+' in name:
+            # Handle offset notation (e.g., "result+1")
+            base_name, offset = name.split('+')
+            base_name = base_name.strip()
+            offset = int(offset.strip())
+            if base_name in self.variables:
+                return self.variables[base_name]['offset'] + offset
+        elif name in self.variables:
             return self.variables[name]['offset']
         raise ValueError(f"Undefined variable: {name}")
 
     def get_memory_byte(self, offset):
         """Get a byte from memory"""
+        if isinstance(offset, str):
+            offset = self.get_variable_offset(offset)
         return self.memory[offset]
 
     def set_memory_byte(self, offset, value):
         """Set a byte in memory"""
+        if isinstance(offset, str):
+            offset = self.get_variable_offset(offset)
         self.memory[offset] = value & 0xFF
 
 class Emulator:
@@ -119,6 +134,11 @@ class Emulator:
         # I/O handler
         self.io_handler = None
 
+        # Add labels dictionary for jumps
+        self.labels = {}
+        self.current_instruction_index = 0
+        self.instructions = []
+
     def set_io_handler(self, handler):
         """Set the I/O handler for input/output operations"""
         self.io_handler = handler
@@ -137,6 +157,9 @@ class Emulator:
         """Parse the assembly program and set up segments"""
         lines = [line.strip() for line in code.split('\n')]
         current_segment = None
+        self.instructions = []
+        self.labels = {}
+        instruction_index = 0
         
         for line in lines:
             if not line or line.startswith(';'):
@@ -144,8 +167,16 @@ class Emulator:
 
             # Remove comments
             line = line.split(';')[0].strip()
-            tokens = line.lower().split()
             
+            # Check for labels
+            if ':' in line and 'db' not in line:
+                label = line.split(':')[0].strip()
+                self.labels[label] = instruction_index
+                line = line.split(':')[1].strip()
+                if not line:  # If line only contains label
+                    continue
+            
+            tokens = line.lower().split()
             if not tokens:
                 continue
 
@@ -166,17 +197,14 @@ class Emulator:
             
             elif current_segment == 'data':
                 if len(tokens) >= 3 and tokens[1] == 'db':
-                    # Handle data definition
                     var_name = tokens[0]
                     if var_name.endswith(','):
                         var_name = var_name[:-1]
                     
-                    # Handle string literals
                     if line.find("'") != -1:
                         value = line[line.find("'"):line.rfind("'") + 1]
                         value = value.strip("'")
                     else:
-                        # Handle numeric or special values
                         value = tokens[2]
                         if value == '?':
                             value = 0
@@ -186,6 +214,10 @@ class Emulator:
                             value = 0
                     
                     self.data_segment.define_variable(var_name, value)
+            
+            elif current_segment == 'code' and line:
+                self.instructions.append(line)
+                instruction_index += 1
 
     def get_register_value(self, reg_name):
         """Get the value of a register"""
@@ -247,7 +279,6 @@ class Emulator:
 
         opcode = tokens[0].strip()
         if len(tokens) > 1:
-            # Split operands and handle whitespace properly
             operands = [op.strip() for op in ' '.join(tokens[1:]).split(',')]
         else:
             operands = []
@@ -263,6 +294,11 @@ class Emulator:
                 source = source.strip()
                 if source == '@data':  # Special case for data segment
                     value = 0  # Simplified data segment handling
+                elif source.endswith('b'):  # Binary number
+                    try:
+                        value = int(source[:-1], 2)
+                    except ValueError:
+                        raise ValueError(f"Invalid binary number: {source}")
                 elif source.startswith('0x'):
                     value = int(source[2:], 16)
                 elif source.endswith('h'):  # Handle hexadecimal values
@@ -274,25 +310,31 @@ class Emulator:
                 else:
                     # Try to get value from memory variable
                     try:
-                        value = self.data_segment.get_memory_byte(self.data_segment.get_variable_offset(source))
+                        value = self.data_segment.get_memory_byte(source)
                     except ValueError:
                         raise ValueError(f"Invalid source operand: {source}")
                 self.set_register_value(dest, value)
             else:
                 # Moving to memory
                 try:
-                    dest_offset = self.data_segment.get_variable_offset(dest)
-                    if source.startswith('0x'):
+                    if source in self.registers:
+                        value = self.get_register_value(source)
+                    elif source.endswith('b'):  # Binary number
+                        try:
+                            value = int(source[:-1], 2)
+                        except ValueError:
+                            raise ValueError(f"Invalid binary number: {source}")
+                    elif source.startswith('0x'):
                         value = int(source[2:], 16)
-                    elif source.endswith('h'):  # Handle hexadecimal values
+                    elif source.endswith('h'):
                         value = int(source[:-1], 16)
                     elif source.isdigit():
                         value = int(source)
                     else:
-                        value = self.get_register_value(source)
-                    self.data_segment.set_memory_byte(dest_offset, value)
-                except ValueError:
-                    raise ValueError(f"Invalid destination operand: {dest}")
+                        value = self.data_segment.get_memory_byte(source)
+                    self.data_segment.set_memory_byte(dest, value)
+                except ValueError as e:
+                    raise ValueError(f"Invalid operand: {str(e)}")
 
         elif opcode == 'add':
             if len(operands) != 2:
@@ -399,6 +441,268 @@ class Emulator:
             else:
                 raise ValueError(f"Unsupported interrupt: {interrupt}")
 
+        elif opcode == 'cmp':
+            if len(operands) != 2:
+                raise ValueError("CMP instruction requires two operands")
+            dest, source = operands
+            
+            # Get destination value
+            if dest in self.registers:
+                dest_val = self.get_register_value(dest)
+            else:
+                try:
+                    dest_offset = self.data_segment.get_variable_offset(dest)
+                    dest_val = self.data_segment.get_memory_byte(dest_offset)
+                except ValueError:
+                    raise ValueError(f"Invalid destination operand: {dest}")
+            
+            # Get source value
+            source = source.strip()
+            if source.startswith("'") and source.endswith("'"):
+                source_val = ord(source[1])
+            elif source.startswith('0x'):
+                source_val = int(source[2:], 16)
+            elif source.endswith('h'):
+                source_val = int(source[:-1], 16)
+            elif source.isdigit():
+                source_val = int(source)
+            elif source in self.registers:
+                source_val = self.get_register_value(source)
+            else:
+                try:
+                    source_offset = self.data_segment.get_variable_offset(source)
+                    source_val = self.data_segment.get_memory_byte(source_offset)
+                except ValueError:
+                    raise ValueError(f"Invalid source operand: {source}")
+            
+            # Update flags based on comparison
+            result = dest_val - source_val
+            self.flags.zero = (result == 0)
+            self.flags.sign = bool(result & 0x80)
+            self.flags.carry = (dest_val < source_val)
+
+        elif opcode == 'je':
+            if not self.flags.zero:
+                return
+            if len(operands) != 1:
+                raise ValueError("JE instruction requires one operand")
+            label = operands[0]
+            if label in self.labels:
+                self.current_instruction_index = self.labels[label]
+                return "jump"
+
+        elif opcode == 'jmp':
+            if len(operands) != 1:
+                raise ValueError("JMP instruction requires one operand")
+            label = operands[0]
+            if label in self.labels:
+                self.current_instruction_index = self.labels[label]
+                return "jump"
+
+        elif opcode == 'mul':
+            if len(operands) != 1:
+                raise ValueError("MUL instruction requires one operand")
+            source = operands[0]
+            
+            # Get source value
+            if source in self.registers:
+                source_val = self.get_register_value(source)
+            else:
+                try:
+                    source_offset = self.data_segment.get_variable_offset(source)
+                    source_val = self.data_segment.get_memory_byte(source_offset)
+                except ValueError:
+                    raise ValueError(f"Invalid source operand: {source}")
+            
+            # Multiply AL by source
+            al_val = self.get_register_value('al')
+            result = al_val * source_val
+            
+            # Store result in AX
+            self.set_register_value('ax', result)
+            
+            # Update flags
+            self.flags.update_flags(result, 16)
+
+        elif opcode == 'div':
+            if len(operands) != 1:
+                raise ValueError("DIV instruction requires one operand")
+            source = operands[0]
+            
+            # Get source value
+            if source in self.registers:
+                source_val = self.get_register_value(source)
+            else:
+                try:
+                    source_offset = self.data_segment.get_variable_offset(source)
+                    source_val = self.data_segment.get_memory_byte(source_offset)
+                except ValueError:
+                    raise ValueError(f"Invalid source operand: {source}")
+            
+            # Check for division by zero
+            if source_val == 0:
+                raise ValueError("Division by zero")
+            
+            # Get AX value
+            ax_val = self.get_register_value('ax')
+            
+            # Perform division
+            quotient = ax_val // source_val
+            remainder = ax_val % source_val
+            
+            # Store results
+            self.set_register_value('al', quotient)
+            self.set_register_value('ah', remainder)
+
+        elif opcode == 'aam':
+            # ASCII adjust after multiplication
+            al_val = self.get_register_value('al')
+            ah_val = al_val // 10
+            al_val = al_val % 10
+            self.set_register_value('ah', ah_val)
+            self.set_register_value('al', al_val)
+            
+            # Update flags
+            self.flags.update_flags((ah_val << 8) | al_val, 16)
+
+        elif opcode == 'and':
+            if len(operands) != 2:
+                raise ValueError("AND instruction requires two operands")
+            dest, source = operands
+            
+            # Get destination value
+            if dest in self.registers:
+                dest_val = self.get_register_value(dest)
+            else:
+                try:
+                    dest_offset = self.data_segment.get_variable_offset(dest)
+                    dest_val = self.data_segment.get_memory_byte(dest_offset)
+                except ValueError:
+                    raise ValueError(f"Invalid destination operand: {dest}")
+            
+            # Get source value
+            source = source.strip()
+            if source.endswith('b'):  # Binary number
+                source_val = int(source[:-1], 2)
+            elif source.startswith('0x'):
+                source_val = int(source[2:], 16)
+            elif source.endswith('h'):
+                source_val = int(source[:-1], 16)
+            elif source.isdigit():
+                source_val = int(source)
+            elif source in self.registers:
+                source_val = self.get_register_value(source)
+            else:
+                try:
+                    source_offset = self.data_segment.get_variable_offset(source)
+                    source_val = self.data_segment.get_memory_byte(source_offset)
+                except ValueError:
+                    raise ValueError(f"Invalid source operand: {source}")
+            
+            # Perform AND operation
+            result = dest_val & source_val
+            
+            # Store result
+            if dest in self.registers:
+                self.set_register_value(dest, result)
+            else:
+                self.data_segment.set_memory_byte(dest_offset, result)
+            
+            # Update flags
+            self.flags.update_flags(result)
+
+        elif opcode == 'or':
+            if len(operands) != 2:
+                raise ValueError("OR instruction requires two operands")
+            dest, source = operands
+            
+            # Get destination value
+            if dest in self.registers:
+                dest_val = self.get_register_value(dest)
+            else:
+                try:
+                    dest_offset = self.data_segment.get_variable_offset(dest)
+                    dest_val = self.data_segment.get_memory_byte(dest_offset)
+                except ValueError:
+                    raise ValueError(f"Invalid destination operand: {dest}")
+            
+            # Get source value
+            source = source.strip()
+            if source.endswith('b'):  # Binary number
+                source_val = int(source[:-1], 2)
+            elif source.startswith('0x'):
+                source_val = int(source[2:], 16)
+            elif source.endswith('h'):
+                source_val = int(source[:-1], 16)
+            elif source.isdigit():
+                source_val = int(source)
+            elif source in self.registers:
+                source_val = self.get_register_value(source)
+            else:
+                try:
+                    source_offset = self.data_segment.get_variable_offset(source)
+                    source_val = self.data_segment.get_memory_byte(source_offset)
+                except ValueError:
+                    raise ValueError(f"Invalid source operand: {source}")
+            
+            # Perform OR operation
+            result = dest_val | source_val
+            
+            # Store result
+            if dest in self.registers:
+                self.set_register_value(dest, result)
+            else:
+                self.data_segment.set_memory_byte(dest_offset, result)
+            
+            # Update flags
+            self.flags.update_flags(result)
+
+        elif opcode == 'xor':
+            if len(operands) != 2:
+                raise ValueError("XOR instruction requires two operands")
+            dest, source = operands
+            
+            # Get destination value
+            if dest in self.registers:
+                dest_val = self.get_register_value(dest)
+            else:
+                try:
+                    dest_offset = self.data_segment.get_variable_offset(dest)
+                    dest_val = self.data_segment.get_memory_byte(dest_offset)
+                except ValueError:
+                    raise ValueError(f"Invalid destination operand: {dest}")
+            
+            # Get source value
+            source = source.strip()
+            if source.endswith('b'):  # Binary number
+                source_val = int(source[:-1], 2)
+            elif source.startswith('0x'):
+                source_val = int(source[2:], 16)
+            elif source.endswith('h'):
+                source_val = int(source[:-1], 16)
+            elif source.isdigit():
+                source_val = int(source)
+            elif source in self.registers:
+                source_val = self.get_register_value(source)
+            else:
+                try:
+                    source_offset = self.data_segment.get_variable_offset(source)
+                    source_val = self.data_segment.get_memory_byte(source_offset)
+                except ValueError:
+                    raise ValueError(f"Invalid source operand: {source}")
+            
+            # Perform XOR operation
+            result = dest_val ^ source_val
+            
+            # Store result
+            if dest in self.registers:
+                self.set_register_value(dest, result)
+            else:
+                self.data_segment.set_memory_byte(dest_offset, result)
+            
+            # Update flags
+            self.flags.update_flags(result)
+
     def handle_int_21h(self):
         """Handle INT 21h services"""
         service = self.get_register_value('ah')
@@ -433,12 +737,23 @@ class Emulator:
                 self.io_handler.handle_output("\nProgram terminated.\n")
 
     def get_memory_byte(self, address):
-        """Get a byte from memory"""
+        """Get a byte from memory with support for offsets"""
+        if isinstance(address, str) and '+' in address:
+            base, offset = address.split('+')
+            base_addr = self.data_segment.get_variable_offset(base)
+            offset_val = int(offset)
+            return self.data_segment.get_memory_byte(base_addr + offset_val)
         return self.data_segment.get_memory_byte(address)
 
     def set_memory_byte(self, address, value):
-        """Set a byte in memory"""
-        self.data_segment.set_memory_byte(address, value)
+        """Set a byte in memory with support for offsets"""
+        if isinstance(address, str) and '+' in address:
+            base, offset = address.split('+')
+            base_addr = self.data_segment.get_variable_offset(base)
+            offset_val = int(offset)
+            self.data_segment.set_memory_byte(base_addr + offset_val, value)
+        else:
+            self.data_segment.set_memory_byte(address, value)
 
     def get_flags_state(self):
         """Get the current state of all flags"""
